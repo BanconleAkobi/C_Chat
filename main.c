@@ -11,7 +11,7 @@ int main(){
         * > 0 si ça s'est bien passé
         *
     */
-    int soketID = socket(AF_INET, SOCK_STREAM, 0); 
+    int socketID = socket(AF_INET, SOCK_STREAM, 0); 
 
 
     char *ip = "142.250.201.174"; 
