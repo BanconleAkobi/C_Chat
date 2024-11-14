@@ -5,19 +5,49 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#include <pthread.h>  // Inclure pthread
 
 #define PORT 5000
 #define LG_MESSAGE 256
+
+// Fonction pour gérer la communication avec un client
+void *gestionClient(void *socketDialoguePtr) {
+    int socketDialogue = *((int *)socketDialoguePtr);  // Récupérer le descripteur de socket
+    char messageRecu[LG_MESSAGE];
+    char messageEnvoi[LG_MESSAGE];
+    
+    while (1) {
+        memset(messageRecu, 0, LG_MESSAGE);
+        
+        // Lecture du message du client
+        int n = read(socketDialogue, messageRecu, LG_MESSAGE - 1);
+        if (n <= 0) {
+            perror("Erreur de lecture ou client déconnecté");
+            break;
+        }
+        printf("Message reçu: %s\n", messageRecu);
+        
+        // Envoi d'un message au client
+        printf("Entrez un message à envoyer au client: ");
+        fgets(messageEnvoi, LG_MESSAGE, stdin);
+        write(socketDialogue, messageEnvoi, strlen(messageEnvoi));
+
+        if (strncmp(messageRecu, "exit", 4) == 0) {
+            break;
+        }
+    }
+
+    close(socketDialogue);
+    printf("Connexion avec un client terminée.\n");
+    pthread_exit(NULL);  // Terminer le thread
+}
 
 int main(int argc, char *argv[]) {
     int socketEcoute;
     struct sockaddr_in pointDeRencontreLocal;
     socklen_t longueurAdresse;
-
     int socketDialogue;
     struct sockaddr_in pointDeRencontreDistant;
-    char messageRecu1[LG_MESSAGE];
-    char messageEnvoi[LG_MESSAGE];
 
     // Crée un socket de communication
     socketEcoute = socket(AF_INET, SOCK_STREAM, 0);
@@ -48,6 +78,8 @@ int main(int argc, char *argv[]) {
     }
     printf("Socket placée en écoute passive...\n");
 
+    pthread_t threadClient;  // Variable pour stocker le thread
+
     while (1) {
         printf("Attente d'une demande de connexion (quitter avec Ctrl-C)\n\n");
 
@@ -58,10 +90,15 @@ int main(int argc, char *argv[]) {
             close(socketEcoute);
             exit(-4);
         }
+        
+        // Création d'un thread pour gérer le client
+        if (pthread_create(&threadClient, NULL, gestionClient, (void *)&socketDialogue) != 0) {
+            perror("Erreur de création de thread");
+        } else {
+            pthread_detach(threadClient);  // Détache le thread pour qu'il se termine proprement
+        }
     }
 
-    // Fermeture des sockets
-    close(socketDialogue);
     close(socketEcoute);
     return 0;
 }
