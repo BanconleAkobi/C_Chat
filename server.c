@@ -5,17 +5,18 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
-#include <pthread.h>  // Inclure pthread
+#include <pthread.h>
+#include <arpa/inet.h>
 
-#define PORT 5000
 #define LG_MESSAGE 256
+#define PORT_DE_BASE 2000
 
-// Fonction pour gérer la communication avec un client
+// Fonction de gestion d'un client
 void *gestionClient(void *socketDialoguePtr) {
     int socketDialogue = *((int *)socketDialoguePtr);  // Récupérer le descripteur de socket
     char messageRecu[LG_MESSAGE];
     char messageEnvoi[LG_MESSAGE];
-    
+
     while (1) {
         memset(messageRecu, 0, LG_MESSAGE);
         
@@ -42,12 +43,12 @@ void *gestionClient(void *socketDialoguePtr) {
     pthread_exit(NULL);  // Terminer le thread
 }
 
-int main(int argc, char *argv[]) {
-    int socketEcoute;
-    struct sockaddr_in pointDeRencontreLocal;
+int main() {
+    int socketEcoute, socketDialogue;
+    struct sockaddr_in pointDeRencontreLocal, pointDeRencontreDistant;
     socklen_t longueurAdresse;
-    int socketDialogue;
-    struct sockaddr_in pointDeRencontreDistant;
+    pthread_t threadClient;
+    int port = PORT_DE_BASE;  // Port de départ, le serveur commence ici
 
     // Crée un socket de communication
     socketEcoute = socket(AF_INET, SOCK_STREAM, 0);
@@ -55,48 +56,49 @@ int main(int argc, char *argv[]) {
         perror("socket");
         exit(-1);
     }
-    printf("Socket créée avec succès ! (%d)\n", socketEcoute);
 
-    // Remplissage de sockaddrDistant
-    longueurAdresse = sizeof(pointDeRencontreLocal);
-    memset(&pointDeRencontreLocal, 0x00, longueurAdresse);
+    // Remplissage de sockaddrLocal
+    memset(&pointDeRencontreLocal, 0, sizeof(pointDeRencontreLocal));
     pointDeRencontreLocal.sin_family = AF_INET;
-    pointDeRencontreLocal.sin_addr.s_addr = htonl(INADDR_ANY);
-    pointDeRencontreLocal.sin_port = htons(PORT);
+    pointDeRencontreLocal.sin_addr.s_addr = htonl(INADDR_ANY);  // Accepter toutes les adresses IP
+    pointDeRencontreLocal.sin_port = htons(port);
 
-    // Demande d’attachement local de la socket
-    if (bind(socketEcoute, (struct sockaddr *)&pointDeRencontreLocal, longueurAdresse) < 0) {
+    // Demande d'attachement local de la socket
+    if (bind(socketEcoute, (struct sockaddr *)&pointDeRencontreLocal, sizeof(pointDeRencontreLocal)) < 0) {
         perror("bind");
+        close(socketEcoute);
         exit(-2);
     }
-    printf("Socket attachée avec succès !\n");
 
-    // Fixe la taille de la file d’attente à 5
+    printf("Serveur démarré sur le port %d\n", port);
+
+    // Fixe la taille de la file d'attente à 5
     if (listen(socketEcoute, 5) < 0) {
         perror("listen");
+        close(socketEcoute);
         exit(-3);
     }
-    printf("Socket placée en écoute passive...\n");
-
-    pthread_t threadClient;  // Variable pour stocker le thread
 
     while (1) {
-        printf("Attente d'une demande de connexion (quitter avec Ctrl-C)\n\n");
-
+        // Attente d'une connexion
         socketDialogue = accept(socketEcoute, (struct sockaddr *)&pointDeRencontreDistant, &longueurAdresse);
         if (socketDialogue < 0) {
             perror("accept");
             close(socketDialogue);
-            close(socketEcoute);
-            exit(-4);
+            continue;
         }
-        
-        // Création d'un thread pour gérer le client
+
+        // Créer un thread pour gérer chaque client
+        printf("Connexion acceptée, affectation du port %d pour ce client...\n", port + 1);
         if (pthread_create(&threadClient, NULL, gestionClient, (void *)&socketDialogue) != 0) {
             perror("Erreur de création de thread");
         } else {
-            pthread_detach(threadClient);  // Détache le thread pour qu'il se termine proprement
+            pthread_detach(threadClient);  // Détacher le thread pour qu'il se termine proprement
         }
+
+        // Augmenter le port pour la prochaine connexion
+        port++;
+        pointDeRencontreLocal.sin_port = htons(port);  // Mettre à jour le port d'écoute pour la prochaine connexion
     }
 
     close(socketEcoute);

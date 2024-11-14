@@ -6,7 +6,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <pthread.h>  // Inclure pthread
+#include <pthread.h>
 
 #define LG_MESSAGE 256
 
@@ -45,20 +45,15 @@ void *envoyerMessages(void *arg) {
     pthread_exit(NULL);
 }
 
-int main(int argc, char *argv[]) {
+int main() {
+    char ip_dest[] = "127.0.0.1";  // Adresse IP du serveur local
     int port_dest;
-    char ip_dest[16];
+
+//initialisation du port de destination.
+    port_dest =  2000; 
+
     struct sockaddr_in sockaddrDistant;
     socklen_t longueurAdresse;
-
-    // Vérification des arguments de la ligne de commande
-    if (argc > 1) {
-        strncpy(ip_dest, argv[1], 16);
-        sscanf(argv[2], "%d", &port_dest);
-    } else {
-        printf("USAGE : %s ip port\n", argv[0]);
-        exit(-1);
-    }
 
     // Création du socket
     descripteurSocket = socket(AF_INET, SOCK_STREAM, 0);
