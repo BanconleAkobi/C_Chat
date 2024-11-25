@@ -5,11 +5,53 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #define PORT 5000
 #define LG_MESSAGE 256
+#define LG_USERNAME 20
+
+typedef struct s_message {
+    char username[LG_USERNAME];
+    char message[LG_MESSAGE];
+} t_message;
+
+typedef struct s_message_list {
+    pthread_mutex_t mutex;
+    t_message *messages;
+    int size;
+} t_message_list;
+
+typedef struct s_thread_data {
+    int socketDialogue;
+    t_message_list *message_list;
+} t_thread_data;
+
+void formatAllMessages(t_message_list *message_list) {
+    pthread_mutex_lock(&message_list->mutex);
+    for (int i = 0; i < message_list->size; i++) {
+        
+    }
+    pthread_mutex_unlock(&message_list->mutex);
+}
+
+void *thread_routine(void *data)
+{
+    t_thread_data *thread_data = (t_thread_data*)data;
+    int socketDialogue = thread_data->socketDialogue;
+    t_message_list *message_list = thread_data->message_list;
+    
+    
+}
 
 int main(int argc, char *argv[]) {
+    // Déclaration des variables et des structures
+    t_message_list message_list;
+    message_list.size = 1;
+    message_list.messages = (int*)malloc(sizeof(t_message) * message_list.size);
+    message_list.messages[0].username[0] = 'Serveur';
+    message_list.messages[0].message[0] = 'Bienvenue sur le chat !';
+
     int socketEcoute;
     struct sockaddr_in pointDeRencontreLocal;
     socklen_t longueurAdresse;
@@ -58,6 +100,13 @@ int main(int argc, char *argv[]) {
             close(socketEcoute);
             exit(-4);
         }
+
+        // Création d'un thread pour gérer la communication
+        pthread_t tid;
+        t_thread_data data;
+        data.socketDialogue = socketDialogue;
+        data.message_list = &message_list;
+        pthread_create(&tid, NULL, thread_routine, &data);
     }
 
     // Fermeture des sockets
