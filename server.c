@@ -10,6 +10,7 @@
 #define PORT 5000
 #define LG_MESSAGE 256
 #define LG_USERNAME 20
+#define MAX_CLIENTS 5
 
 typedef struct s_message {
     char username[LG_USERNAME];
@@ -21,6 +22,14 @@ typedef struct s_message_list {
     t_message *messages;
     int size;
 } t_message_list;
+
+typedef struct s_client_list {
+    pthread_mutex_t mutex;
+    int sockets[MAX_CLIENTS];
+    int count;
+} t_client_list;
+
+t_client_list client_list;
 
 typedef struct s_thread_data {
     int socketDialogue;
@@ -54,44 +63,43 @@ int verifyUsername(char *username) {
     if (strlen(username) <= 0 && strlen(username) >= LG_USERNAME) {
         return 0;
     }
-    for (int i = 0; i < strlen(username); i++) {
-        if (!(username[i] > 'A' && username[i] < 'Z') && !(username[i] > 'a' && username[i] < 'z') && !(username[i] > '0' && username[i] < '9') && username[i] != '\0') {
-            return 0;
-        }
-    }
     return 1;
 }
 
-void sendLastMessages(int socketDialogue, t_message_list *message_list, int count, int justLoggedIn) {
+void broadcastMessages(t_message_list *message_list, int count) {
+    pthread_mutex_lock(&client_list.mutex);
     char buffer[LG_MESSAGE];
-
-    if (send(socketDialogue, "--------------", LG_MESSAGE, 0) == -1) {
-        perror("send");
-        close(socketDialogue);
-        exit(-6);
-    }
-
-    for (int i = message_list->size - count; i < message_list->size; i++) {
-        formatMessage(message_list, i, buffer);
-        if (send(socketDialogue, buffer, LG_MESSAGE, 0) == -1) {
-            perror("send");
-            close(socketDialogue);
-            exit(-6);
+    for (int i = 0; i < client_list.count; i++) {
+        int clientSocket = client_list.sockets[i];
+        for (int j = message_list->size - count; j < message_list->size; j++) {
+            if (j >= 0) {
+                formatMessage(message_list, j, buffer);
+                if (write(clientSocket, buffer, strlen(buffer)) < 0) {
+                    perror("broadcast write");
+                }
+            }
         }
     }
-    if (justLoggedIn) {
-        if (send(socketDialogue, "Serveur : Bienvenue !", LG_MESSAGE, 0) == -1) {
-            perror("send");
-            close(socketDialogue);
-            exit(-6);
+    pthread_mutex_unlock(&client_list.mutex);
+}
+
+void addClientToList(int clientSocket) {
+    pthread_mutex_lock(&client_list.mutex);
+    if (client_list.count < MAX_CLIENTS) {
+        client_list.sockets[client_list.count++] = clientSocket;
+    }
+    pthread_mutex_unlock(&client_list.mutex);
+}
+
+void removeClientFromList(int clientSocket) {
+    pthread_mutex_lock(&client_list.mutex);
+    for (int i = 0; i < client_list.count; i++) {
+        if (client_list.sockets[i] == clientSocket) {
+            client_list.sockets[i] = client_list.sockets[--client_list.count];
+            break;
         }
     }
-
-    if (send(socketDialogue, "->", LG_MESSAGE, 0) == -1) {
-        perror("send");
-        close(socketDialogue);
-        exit(-6);
-    }
+    pthread_mutex_unlock(&client_list.mutex);
 }
 
 void *thread_routine(void *data)
@@ -129,27 +137,28 @@ void *thread_routine(void *data)
             }
         }
     } while (strlen(username) == 0);
+    
+    printf("User '%s' connected.\n", username);
+    addClientToList(socketDialogue);
 
     // Boucle de communication
-    sendLastMessages(socketDialogue, message_list, 5, justLoggedIn);
-    justLoggedIn = 0;
     while (1) {
-        // Réception d'un message du client
-        if (recv(socketDialogue, messageRecu, LG_MESSAGE, 0) == -1) {
+        // Reception du message
+        if (recv(socketDialogue, messageRecu, LG_MESSAGE, 0) <= 0) {
             perror("recv");
-            close(socketDialogue);
-            exit(-5);
+            break;
         }
-
-        // Affichage du message reçu
-        printf("Message reçu : %s\n", messageRecu);
 
         // Ajout du message à la liste
         addMessageToList(message_list, username, messageRecu);
-
-        // Envoi des cinq derniers messages au client
-        sendLastMessages(socketDialogue, message_list, 5, justLoggedIn);
+        broadcastMessages(message_list, 5);
     }
+    
+    // Fermeture de la socket de dialogue
+    printf("User '%s' disconnected.\n", username);
+    removeClientFromList(socketDialogue);
+    close(socketDialogue);
+    pthread_exit(NULL);
 }
 
 int main(int argc, char *argv[]) {
@@ -158,6 +167,8 @@ int main(int argc, char *argv[]) {
     message_list.size = 0;
     message_list.messages = (t_message*)malloc(sizeof(t_message) * message_list.size);
     pthread_mutex_init(&message_list.mutex, NULL);
+    client_list.count = 0;
+    pthread_mutex_init(&client_list.mutex, NULL);
 
     int socketEcoute;
     struct sockaddr_in pointDeRencontreLocal;
@@ -190,8 +201,8 @@ int main(int argc, char *argv[]) {
     }
     printf("Socket attachée avec succès !\n");
 
-    // Fixe la taille de la file d’attente à 5
-    if (listen(socketEcoute, 5) < 0) {
+    // Fixe la taille de la file d’attente au maximum
+    if (listen(socketEcoute, MAX_CLIENTS) < 0) {
         perror("listen");
         exit(-3);
     }
