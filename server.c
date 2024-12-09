@@ -6,6 +6,7 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <ctype.h>
 
 #define PORT 5000
 #define LG_MESSAGE 256
@@ -27,12 +28,35 @@ typedef struct s_thread_data {
     t_message_list *message_list;
 } t_thread_data;
 
-void formatAllMessages(t_message_list *message_list) {
+void formatMessage(t_message_list *message_list, int index, char *buffer) {
     pthread_mutex_lock(&message_list->mutex);
-    for (int i = 0; i < message_list->size; i++) {
-        
+    if (index < message_list->size, index >= 0) {
+        sprintf(buffer, "%s : %s", message_list->messages[index].username, message_list->messages[index].message);
+    } else {
+        buffer[0] = '\0';
     }
     pthread_mutex_unlock(&message_list->mutex);
+}
+
+void addMessageToList(t_message_list *message_list, char *username, char *message) {
+    pthread_mutex_lock(&message_list->mutex);
+    message_list->size++;
+    message_list->messages = realloc(message_list->messages, sizeof(t_message) * (message_list->size+1));
+    strcpy(message_list->messages[message_list->size - 1].username, username);
+    strcpy(message_list->messages[message_list->size - 1].message, message);
+    pthread_mutex_unlock(&message_list->mutex);
+}
+
+int verifyUsername(char *username) {
+    if (strlen(username) <= 0 && strlen(username) >= LG_USERNAME) {
+        return 0;
+    }
+    for (int i = 0; i < strlen(username); i++) {
+        if (!isalnum(username[i])) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 void *thread_routine(void *data)
@@ -41,16 +65,79 @@ void *thread_routine(void *data)
     int socketDialogue = thread_data->socketDialogue;
     t_message_list *message_list = thread_data->message_list;
     
-    
+    char messageRecu[LG_MESSAGE];
+    char messageEnvoi[LG_MESSAGE];
+    char buffer[LG_MESSAGE];
+    int justLoggedIn = 1;
+
+    char username[LG_USERNAME] = "";
+    // Demande d'un nom d'utilisateur
+    if (send(socketDialogue, "Entrez votre nom d'utilisateur : ", LG_MESSAGE, 0) == -1) {
+        perror("send");
+        close(socketDialogue);
+        exit(-6);
+    }
+    do {
+        if (recv(socketDialogue, messageRecu, LG_MESSAGE, 0) == -1) {
+            perror("recv");
+            close(socketDialogue);
+            exit(-5);
+        }
+
+        if (verifyUsername(messageRecu)) {
+            strcpy(username, messageRecu);
+        } else {
+            if (send(socketDialogue, "Nom d'utilisateur invalide. Entrez un nom d'utilisateur valide : ", LG_MESSAGE, 0) == -1) {
+                perror("send");
+                close(socketDialogue);
+                exit(-6);
+            }
+        }
+    } while (strlen(username) == 0);
+
+    // Boucle de communication
+    while (1) {
+        // Réception d'un message du client
+        if (recv(socketDialogue, messageRecu, LG_MESSAGE, 0) == -1) {
+            perror("recv");
+            close(socketDialogue);
+            exit(-5);
+        }
+
+        // Affichage du message reçu
+        printf("Message reçu : %s\n", messageRecu);
+
+        // Ajout du message à la liste
+        addMessageToList(message_list, username, messageRecu);
+
+        // Envoi des cinq derniers messages au client
+        for (int i = message_list->size - 5; i < message_list->size; i++) {
+            formatMessage(message_list, i, buffer);
+            if (send(socketDialogue, buffer, LG_MESSAGE, 0) == -1) {
+                perror("send");
+                close(socketDialogue);
+                exit(-6);
+            }
+        }
+
+        // Envoi du message à tous les clients
+        if (justLoggedIn) {
+            if (send(socketDialogue, "Serveur : Bienvenue !", LG_MESSAGE, 0) == -1) {
+                perror("send");
+                close(socketDialogue);
+                exit(-6);
+            }
+            justLoggedIn = 0;
+        }
+    }
 }
 
 int main(int argc, char *argv[]) {
     // Déclaration des variables et des structures
     t_message_list message_list;
-    message_list.size = 1;
-    message_list.messages = (int*)malloc(sizeof(t_message) * message_list.size);
-    message_list.messages[0].username[0] = 'Serveur';
-    message_list.messages[0].message[0] = 'Bienvenue sur le chat !';
+    message_list.size = 0;
+    message_list.messages = (t_message*)malloc(sizeof(t_message) * message_list.size);
+    pthread_mutex_init(&message_list.mutex, NULL);
 
     int socketEcoute;
     struct sockaddr_in pointDeRencontreLocal;
