@@ -6,7 +6,6 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <pthread.h>
-#include <ctype.h>
 
 #define PORT 5000
 #define LG_MESSAGE 256
@@ -48,15 +47,51 @@ void addMessageToList(t_message_list *message_list, char *username, char *messag
 }
 
 int verifyUsername(char *username) {
+    // Remove trailing newline
+    if (username[strlen(username) - 1] == '\n') {
+        username[strlen(username) - 1] = '\0';
+    }
     if (strlen(username) <= 0 && strlen(username) >= LG_USERNAME) {
         return 0;
     }
     for (int i = 0; i < strlen(username); i++) {
-        if (!isalnum(username[i])) {
+        if (!(username[i] > 'A' && username[i] < 'Z') && !(username[i] > 'a' && username[i] < 'z') && !(username[i] > '0' && username[i] < '9') && username[i] != '\0') {
             return 0;
         }
     }
     return 1;
+}
+
+void sendLastMessages(int socketDialogue, t_message_list *message_list, int count, int justLoggedIn) {
+    char buffer[LG_MESSAGE];
+
+    if (send(socketDialogue, "--------------", LG_MESSAGE, 0) == -1) {
+        perror("send");
+        close(socketDialogue);
+        exit(-6);
+    }
+
+    for (int i = message_list->size - count; i < message_list->size; i++) {
+        formatMessage(message_list, i, buffer);
+        if (send(socketDialogue, buffer, LG_MESSAGE, 0) == -1) {
+            perror("send");
+            close(socketDialogue);
+            exit(-6);
+        }
+    }
+    if (justLoggedIn) {
+        if (send(socketDialogue, "Serveur : Bienvenue !", LG_MESSAGE, 0) == -1) {
+            perror("send");
+            close(socketDialogue);
+            exit(-6);
+        }
+    }
+
+    if (send(socketDialogue, "->", LG_MESSAGE, 0) == -1) {
+        perror("send");
+        close(socketDialogue);
+        exit(-6);
+    }
 }
 
 void *thread_routine(void *data)
@@ -84,7 +119,7 @@ void *thread_routine(void *data)
             exit(-5);
         }
 
-        if (verifyUsername(messageRecu)) {
+        if (verifyUsername(messageRecu) == 1) {
             strcpy(username, messageRecu);
         } else {
             if (send(socketDialogue, "Nom d'utilisateur invalide. Entrez un nom d'utilisateur valide : ", LG_MESSAGE, 0) == -1) {
@@ -96,6 +131,8 @@ void *thread_routine(void *data)
     } while (strlen(username) == 0);
 
     // Boucle de communication
+    sendLastMessages(socketDialogue, message_list, 5, justLoggedIn);
+    justLoggedIn = 0;
     while (1) {
         // Réception d'un message du client
         if (recv(socketDialogue, messageRecu, LG_MESSAGE, 0) == -1) {
@@ -111,24 +148,7 @@ void *thread_routine(void *data)
         addMessageToList(message_list, username, messageRecu);
 
         // Envoi des cinq derniers messages au client
-        for (int i = message_list->size - 5; i < message_list->size; i++) {
-            formatMessage(message_list, i, buffer);
-            if (send(socketDialogue, buffer, LG_MESSAGE, 0) == -1) {
-                perror("send");
-                close(socketDialogue);
-                exit(-6);
-            }
-        }
-
-        // Envoi du message à tous les clients
-        if (justLoggedIn) {
-            if (send(socketDialogue, "Serveur : Bienvenue !", LG_MESSAGE, 0) == -1) {
-                perror("send");
-                close(socketDialogue);
-                exit(-6);
-            }
-            justLoggedIn = 0;
-        }
+        sendLastMessages(socketDialogue, message_list, 5, justLoggedIn);
     }
 }
 

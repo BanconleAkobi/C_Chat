@@ -40,7 +40,6 @@ void sendMessage() {
 
 int main(int argc, char *argv[]) {
     // Déclaration des variables et des structures
-    int socketDialogue;
     struct sockaddr_in sockaddrDistant;
     socklen_t longueurAdresse;
 
