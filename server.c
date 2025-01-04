@@ -192,6 +192,7 @@ void *thread_routine(void *data)
     addMessageToList(message_list, username, "Déconnecté");
     broadcastMessages(message_list, 1, socketDialogue);
     
+    
     // Fermeture de la socket de dialogue
     printf("Utilisateur '%s' déconnecté.\n", username);
     removeClientFromList(socketDialogue);

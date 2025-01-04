@@ -23,11 +23,18 @@ void removeNewlines(char *s) {
 void recvMessage() {
     while (1) {
         char messageRecu[LG_MESSAGE] = {0};
-        if (recv(socketDialogue, messageRecu, LG_MESSAGE, 0) == -1) {
+        int byteRead = recv(socketDialogue, messageRecu, LG_MESSAGE, 0); 
+        if ( byteRead == -1) {
             perror("recv");
             close(socketDialogue);
             exit(-5);
+        } else if(byteRead == 0){
+            //couper la connexion si le serveur 
+            printf("Le serveur a fermé la connexion.\n");
+            close(socketDialogue);
+            exit(0); // Quitte proprement le programme
         }
+
         printf("%s\n", messageRecu);
     }
 }
