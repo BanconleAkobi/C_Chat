@@ -8,7 +8,7 @@
 #include <pthread.h>
 
 #define PORT 5000
-#define LG_MESSAGE 256
+#define LG_MESSAGE 2000
 #define LG_USERNAME 20
 #define MAX_CLIENTS 5
 
@@ -48,10 +48,20 @@ void formatMessage(t_message_list *message_list, int index, char *buffer) {
 
 void addMessageToList(t_message_list *message_list, char *username, char *message) {
     pthread_mutex_lock(&message_list->mutex);
+    t_message *newMessages = realloc(message_list->messages, sizeof(t_message) * (message_list->size + 1));
+    if (newMessages == NULL) {
+        perror("realloc");
+        pthread_mutex_unlock(&message_list->mutex);
+        return;
+    }
+    message_list->messages = newMessages;
+
+    strncpy(message_list->messages[message_list->size].username, username, LG_USERNAME - 1);
+    message_list->messages[message_list->size].username[LG_USERNAME - 1] = '\0';
+    strncpy(message_list->messages[message_list->size].message, message, LG_MESSAGE - 1);
+    message_list->messages[message_list->size].message[LG_MESSAGE - 1] = '\n';
     message_list->size++;
-    message_list->messages = realloc(message_list->messages, sizeof(t_message) * (message_list->size+1));
-    strcpy(message_list->messages[message_list->size - 1].username, username);
-    strcpy(message_list->messages[message_list->size - 1].message, message);
+
     pthread_mutex_unlock(&message_list->mutex);
 }
 
@@ -66,14 +76,14 @@ int verifyUsername(char *username) {
     return 1;
 }
 
-void broadcastMessages(t_message_list *message_list, int count) {
+void broadcastMessages(t_message_list *message_list, int count, int originSocket) {
     pthread_mutex_lock(&client_list.mutex);
     char buffer[LG_MESSAGE];
     for (int i = 0; i < client_list.count; i++) {
         int clientSocket = client_list.sockets[i];
         for (int j = message_list->size - count; j < message_list->size; j++) {
-            if (j >= 0) {
-                formatMessage(message_list, j, buffer);
+            if (j >= 0 && clientSocket != originSocket) {
+                formatMessage(message_list, message_list->size-1, buffer);
                 if (write(clientSocket, buffer, strlen(buffer)) < 0) {
                     perror("broadcast write");
                 }
@@ -111,15 +121,11 @@ void *thread_routine(void *data)
     char messageRecu[LG_MESSAGE];
     char messageEnvoi[LG_MESSAGE];
     char buffer[LG_MESSAGE];
-    int justLoggedIn = 1;
-
+    char empty[LG_MESSAGE];
+    int justLoggedIn = 1;;
     char username[LG_USERNAME] = "";
-    // Demande d'un nom d'utilisateur
-    if (send(socketDialogue, "Entrez votre nom d'utilisateur : ", LG_MESSAGE, 0) == -1) {
-        perror("send");
-        close(socketDialogue);
-        exit(-6);
-    }
+
+    // Réception d'un nom d'utilisateur
     do {
         if (recv(socketDialogue, messageRecu, LG_MESSAGE, 0) == -1) {
             perror("recv");
@@ -129,8 +135,15 @@ void *thread_routine(void *data)
 
         if (verifyUsername(messageRecu) == 1) {
             strcpy(username, messageRecu);
+            strcpy(messageEnvoi, "USERNAME_OK");
+            if (send(socketDialogue, messageEnvoi, LG_MESSAGE, 0) == -1) {
+                perror("send");
+                close(socketDialogue);
+                exit(-6);
+            }
         } else {
-            if (send(socketDialogue, "Nom d'utilisateur invalide. Entrez un nom d'utilisateur valide : ", LG_MESSAGE, 0) == -1) {
+            strcpy(messageEnvoi, "Nom d'utilisateur invalide. Entrez un nom d'utilisateur valide : ");
+            if (send(socketDialogue, messageEnvoi, LG_MESSAGE, 0) == -1) {
                 perror("send");
                 close(socketDialogue);
                 exit(-6);
@@ -138,24 +151,49 @@ void *thread_routine(void *data)
         }
     } while (strlen(username) == 0);
     
-    printf("User '%s' connected.\n", username);
+    printf("Utilisateur '%s' connecté.\n", username);
     addClientToList(socketDialogue);
+
+    // Envoi de l'historique des messages au nouveau client
+    for (int i = 0; i < message_list->size; i++) {
+        formatMessage(message_list, i, buffer);
+        if (write(socketDialogue, buffer, strlen(buffer)) < 0) {
+            perror("history write");
+        }
+    }
+
+    // Envoi de l'annonce de connexion
+    addMessageToList(message_list, username, "Connecté");
+    broadcastMessages(message_list, 1, socketDialogue);
 
     // Boucle de communication
     while (1) {
+        int messageLength = 0;
+        // Receive the message length first
+        if (recv(socketDialogue, &messageLength, sizeof(int), 0) <= 0) {
+            perror("recv length");
+            break;
+        }
+
+        memset(messageRecu, 0, LG_MESSAGE);
         // Reception du message
-        if (recv(socketDialogue, messageRecu, LG_MESSAGE, 0) <= 0) {
+        if (recv(socketDialogue, messageRecu, messageLength, 0) <= 0) {
             perror("recv");
             break;
         }
 
         // Ajout du message à la liste
         addMessageToList(message_list, username, messageRecu);
-        broadcastMessages(message_list, 5);
+        broadcastMessages(message_list, 1, socketDialogue);
+        messageRecu[0] = '\0';
     }
+
+    // Envoi de l'annonce de déconnexion
+    addMessageToList(message_list, username, "Déconnecté");
+    broadcastMessages(message_list, 1, socketDialogue);
     
     // Fermeture de la socket de dialogue
-    printf("User '%s' disconnected.\n", username);
+    printf("Utilisateur '%s' déconnecté.\n", username);
     removeClientFromList(socketDialogue);
     close(socketDialogue);
     pthread_exit(NULL);

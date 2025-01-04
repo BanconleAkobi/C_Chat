@@ -13,9 +13,16 @@
 
 int socketDialogue;
 
+void removeNewlines(char *s) {
+    char *newline = strpbrk(s, "\r\n");
+    if (newline) {
+        *newline = '\0';
+    }
+}
+
 void recvMessage() {
-    char messageRecu[LG_MESSAGE];
     while (1) {
+        char messageRecu[LG_MESSAGE] = {0};
         if (recv(socketDialogue, messageRecu, LG_MESSAGE, 0) == -1) {
             perror("recv");
             close(socketDialogue);
@@ -26,13 +33,26 @@ void recvMessage() {
 }
 
 void sendMessage() {
-    char messageEnvoi[LG_MESSAGE];
     while (1) {
+        char messageEnvoi[LG_MESSAGE] = {0};
         fgets(messageEnvoi, LG_MESSAGE, stdin);
-        if (send(socketDialogue, messageEnvoi, strlen(messageEnvoi), 0) == -1) {
-            perror("send");
-            close(socketDialogue);
-            exit(-6);
+        removeNewlines(messageEnvoi);
+
+        // Get the message length
+        int messageLength = strlen(messageEnvoi);
+        if (messageLength > 0) {
+            // Send the length first
+            if (send(socketDialogue, &messageLength, sizeof(int), 0) == -1) {
+                perror("send length");
+                close(socketDialogue);
+                exit(-6);
+            }
+            // Send the actual message
+            if (send(socketDialogue, messageEnvoi, messageLength, 0) == -1) {
+                perror("send message");
+                close(socketDialogue);
+                exit(-6);
+            }
         }
     }
 }
@@ -42,9 +62,6 @@ int main(int argc, char *argv[]) {
     // Déclaration des variables et des structures
     struct sockaddr_in sockaddrDistant;
     socklen_t longueurAdresse;
-
-    char messageRecu[LG_MESSAGE];
-    char messageEnvoi[LG_MESSAGE];
 
     char ip_dest[16];
     int port_dest;
@@ -82,6 +99,25 @@ int main(int argc, char *argv[]) {
         exit(-2);
     }
     printf("Connexion au serveur %s:%d réussie!\n", ip_dest, port_dest);
+
+    char username[LG_MESSAGE];
+    printf("Entrez votre nom d'utilisateur: ");
+    fgets(username, LG_MESSAGE, stdin);
+    removeNewlines(username);
+
+    
+    char response[LG_MESSAGE] = {0};
+    do {
+        // Send username
+        send(socketDialogue, username, LG_MESSAGE, 0);
+
+        // Receive response
+        if (recv(socketDialogue, response, LG_MESSAGE, 0) == -1) {
+            perror("recv");
+            close(socketDialogue);
+            exit(-5);
+        }
+    } while (strcmp(response, "USERNAME_OK") != 0);
 
     pthread_t recvMessageThread;
     pthread_create(&recvMessageThread, NULL, (void*)recvMessage, NULL);
